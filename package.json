@@ -1,0 +1,10 @@
+{
+  "name": "supabase-script",
+  "version": "1.0.0",
+  "description": "Supabase login automation",
+  "type": "module",
+  "main": "run.js",
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}
