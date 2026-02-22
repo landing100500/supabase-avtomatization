@@ -65,10 +65,19 @@ async function runOnce() {
     log('Переход на страницу входа Supabase...');
     await page.goto('https://supabase.com/dashboard/sign-in', { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    await page.waitForTimeout(2000);
-
+    // Даём время на редирект (если уже залогинены) или на появление формы
+    await page.waitForTimeout(4000);
     let currentUrl = page.url();
-    const alreadyOnDashboard = currentUrl.includes('/dashboard') && !currentUrl.includes('sign-in');
+    let alreadyOnDashboard = currentUrl.includes('/dashboard') && !currentUrl.includes('sign-in');
+
+    if (!alreadyOnDashboard) {
+      const passwordInput = page.locator('input[type="password"], input[name="password"]').first();
+      const formVisible = await passwordInput.waitFor({ state: 'visible', timeout: 12000 }).then(() => true).catch(() => false);
+      if (!formVisible) {
+        currentUrl = page.url();
+        alreadyOnDashboard = currentUrl.includes('/dashboard') && !currentUrl.includes('sign-in');
+      }
+    }
 
     if (alreadyOnDashboard) {
       log('Уже залогинены (редирект на дашборд), пропуск формы входа.');
@@ -82,10 +91,11 @@ async function runOnce() {
         if (await continueEmail.isVisible().catch(() => false)) {
           log('Нажимаю "Continue with Email"...');
           await continueEmail.click();
-          await page.waitForTimeout(1500);
+          await page.waitForTimeout(2000);
         }
       }
 
+      await passwordInput.waitFor({ state: 'visible', timeout: 15000 });
       log('Ввод email и пароля (медленно, как человек)...');
       await emailInput.click();
       await page.waitForTimeout(300);
@@ -144,20 +154,49 @@ async function runOnce() {
     await page.goto(orgDashboardUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForTimeout(3000);
 
-    const projectNames = await page.evaluate(() => {
-      const names = [];
+    const projectLinks = await page.evaluate(() => {
+      const items = [];
       document.querySelectorAll('h5.text-sm.truncate').forEach((el) => {
-        const text = (el.textContent || '').trim();
-        if (text) names.push(text);
+        const name = (el.textContent || '').trim();
+        if (!name) return;
+        let a = el.closest('a[href*="/project/"]');
+        if (!a) {
+          const block = el.closest('li, [class*="card"], [class*="project"], [role="listitem"]');
+          a = block?.querySelector?.('a[href*="/project/"]') || null;
+        }
+        if (a?.href) items.push({ name, href: a.href });
       });
-      return names;
+      return items;
     }).catch(() => []);
 
-    if (projectNames.length > 0) {
-      log('Проекты на дашборде:', projectNames.length);
-      projectNames.forEach((name, i) => log(`  ${i + 1}. ${name}`));
+    if (projectLinks.length > 0) {
+      log('Проекты на дашборде:', projectLinks.length);
+      projectLinks.forEach((p, i) => log(`  ${i + 1}. ${p.name}`));
+
+      for (const project of projectLinks) {
+        log('Захожу в проект:', project.name);
+        await page.goto(project.href, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        await page.waitForTimeout(2000);
+
+        const scrollAndWait = async () => {
+          const scrolls = 2 + Math.floor(Math.random() * 3);
+          for (let i = 0; i < scrolls; i++) {
+            await page.mouse.wheel(0, 200 + Math.random() * 300);
+            await page.waitForTimeout(800 + Math.random() * 1200);
+          }
+        };
+        await scrollAndWait();
+        log('Ожидание 10 сек в проекте', project.name);
+        await page.waitForTimeout(10000);
+        await scrollAndWait();
+
+        log('Выхожу из проекта', project.name);
+        await page.goto(orgDashboardUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        await page.waitForTimeout(1500);
+      }
+      log('Обработаны все проекты.');
     } else {
-      log('Проекты не найдены (селектор h5.text-sm.truncate).');
+      log('Проекты не найдены (h5.text-sm.truncate внутри a[href*="/project/"]).');
     }
 
     // Открываем ещё страницу Account
